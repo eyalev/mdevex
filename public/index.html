@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>web-agent</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; background: #1e1e1e; color: #ccc; font-family: system-ui, sans-serif; overflow: hidden; overscroll-behavior: none; }
+
+    #app {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      position: fixed;
+      inset: 0;
+    }
+
+    /* UI Slots */
+    #slot-top-bar { flex-shrink: 0; }
+    #slot-bottom-bar { flex-shrink: 0; }
+    #slot-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 100; }
+    #slot-overlay > * { pointer-events: auto; }
+    #slot-settings-panel { display: none; }
+
+    /* Toolbar */
+    #toolbar {
+      display: flex;
+      background: #111;
+      border-bottom: 1px solid #333;
+      flex-shrink: 0;
+    }
+    #slot-toolbar-left, #slot-toolbar-right { display: flex; flex-shrink: 0; }
+    #tab-bar {
+      display: flex;
+      overflow-x: auto;
+      flex: 1;
+      min-width: 0;
+      scrollbar-width: none;
+    }
+    #tab-bar::-webkit-scrollbar { display: none; }
+
+    /* Tabs */
+    .tab {
+      padding: 8px 16px;
+      cursor: pointer;
+      white-space: nowrap;
+      font-size: 14px;
+      color: #888;
+      border-right: 1px solid #222;
+      user-select: none;
+      flex-shrink: 0;
+      position: relative;
+    }
+    .tab:hover { background: #222; color: #ccc; }
+    .tab.active { background: #1e1e1e; color: #fff; border-bottom: 2px solid #4ec9b0; }
+
+    /* Terminal */
+    #terminal-area { flex: 1; position: relative; overflow: hidden; touch-action: none; }
+    .terminal-wrapper { display: none; width: 100%; height: 100%; }
+    .terminal-wrapper.active { display: block; }
+
+    /* Status */
+    #status {
+      padding: 4px 10px;
+      font-size: 12px;
+      color: #666;
+      background: #111;
+      border-top: 1px solid #222;
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="slot-top-bar"></div>
+    <div id="toolbar">
+      <div id="slot-toolbar-left"></div>
+      <div id="tab-bar"></div>
+      <div id="slot-toolbar-right"></div>
+    </div>
+    <div id="terminal-area"></div>
+    <div id="slot-bottom-bar"></div>
+    <div id="slot-overlay"></div>
+    <div id="slot-settings-panel"></div>
+    <div id="status">Connecting...</div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.js"></script>
+  <script>
+    // --- Event bus ---
+    const _handlers = {};
+    const eventBus = {
+      on(event, fn) {
+        (_handlers[event] = _handlers[event] || []).push(fn);
+      },
+      off(event, fn) {
+        const list = _handlers[event];
+        if (list) _handlers[event] = list.filter(f => f !== fn);
+      },
+      emit(event, data) {
+        (_handlers[event] || []).forEach(fn => {
+          try { fn(data); } catch (e) { console.error(`Event ${event} handler error:`, e); }
+        });
+      },
+    };
+
+    // --- State ---
+    const sessions = {};
+    let activeSession = null;
+    const statusEl = document.getElementById('status');
+    const tabBar = document.getElementById('tab-bar');
+    const terminalArea = document.getElementById('terminal-area');
+
+    // --- Public plugin API ---
+    window.webAgent = {
+      on: eventBus.on,
+      off: eventBus.off,
+      emit: eventBus.emit,
+
+      slots: {
+        'top-bar': document.getElementById('slot-top-bar'),
+        'bottom-bar': document.getElementById('slot-bottom-bar'),
+        'toolbar-left': document.getElementById('slot-toolbar-left'),
+        'toolbar-right': document.getElementById('slot-toolbar-right'),
+        'overlay': document.getElementById('slot-overlay'),
+        'settings-panel': document.getElementById('slot-settings-panel'),
+      },
+
+      getActiveSession() { return activeSession; },
+      getSessions() { return Object.keys(sessions); },
+      getTerminal(name) { return sessions[name]?.terminal; },
+
+      activateSession(name) { activateSession(name); },
+      sendToTerminal(session, data) {
+        const s = sessions[session];
+        if (s?.ws?.readyState === WebSocket.OPEN) s.ws.send(data);
+      },
+
+      // Force-disconnect active session (for testing/plugins)
+      disconnect(name) {
+        const s = sessions[name || activeSession];
+        if (s?.ws) { s.ws.close(); }
+      },
+
+      decorateTab(session, html) {
+        const s = sessions[session];
+        if (!s?.tab) return;
+        let dec = s.tab.querySelector('.tab-decoration');
+        if (!dec) {
+          dec = document.createElement('span');
+          dec.className = 'tab-decoration';
+          s.tab.appendChild(dec);
+        }
+        dec.innerHTML = html;
+      },
+    };
+
+    // --- Session loading ---
+    async function loadSessions() {
+      try {
+        const res = await fetch('/api/sessions');
+        const list = await res.json();
+        const names = list.map(s => s.name);
+
+        // Remove tabs for dead sessions
+        for (const name of Object.keys(sessions)) {
+          if (!names.includes(name)) destroySession(name);
+        }
+
+        // Add tabs for new sessions
+        for (const name of names) {
+          if (!sessions[name]) createTab(name);
+        }
+
+        // Activate first if none active
+        if (!activeSession && names.length > 0) {
+          activateSession(names[0]);
+        }
+
+        statusEl.textContent = `${names.length} session${names.length !== 1 ? 's' : ''}`;
+        eventBus.emit('sessions-loaded', { sessions: names });
+      } catch (err) {
+        statusEl.textContent = 'Failed to load sessions';
+      }
+    }
+
+    function createTab(name) {
+      const tab = document.createElement('div');
+      tab.className = 'tab';
+      tab.textContent = name;
+      tab.addEventListener('click', () => activateSession(name));
+      tabBar.appendChild(tab);
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'terminal-wrapper';
+      terminalArea.appendChild(wrapper);
+
+      sessions[name] = { tab, wrapper, terminal: null, ws: null, fitAddon: null, reconnectDelay: 1000 };
+    }
+
+    function destroySession(name) {
+      const s = sessions[name];
+      if (!s) return;
+      if (s.ws) { s.intentionalClose = true; s.ws.close(); }
+      if (s.reconnectTimer) clearTimeout(s.reconnectTimer);
+      if (s.terminal) s.terminal.dispose();
+      s.tab.remove();
+      s.wrapper.remove();
+      delete sessions[name];
+      if (activeSession === name) {
+        activeSession = null;
+        const remaining = Object.keys(sessions);
+        if (remaining.length > 0) activateSession(remaining[0]);
+      }
+    }
+
+    function activateSession(name) {
+      const s = sessions[name];
+      if (!s) return;
+
+      const previous = activeSession;
+
+      // Deactivate previous
+      if (previous && sessions[previous]) {
+        sessions[previous].tab.classList.remove('active');
+        sessions[previous].wrapper.classList.remove('active');
+        // Disconnect previous to free resources
+        if (sessions[previous].ws) {
+          sessions[previous].intentionalClose = true;
+          sessions[previous].ws.close();
+        }
+      }
+
+      activeSession = name;
+      s.tab.classList.add('active');
+      s.wrapper.classList.add('active');
+
+      // Scroll tab into view
+      s.tab.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+
+      // Init terminal if needed
+      if (!s.terminal) {
+        initTerminal(name);
+      } else {
+        // Reconnect if not connected
+        if (!s.ws || s.ws.readyState !== WebSocket.OPEN) {
+          connectWebSocket(name);
+        }
+        s.fitAddon.fit();
+        s.terminal.focus();
+      }
+
+      eventBus.emit('session-changed', { session: name, previous });
+    }
+
+    // --- Terminal ---
+    function initTerminal(name) {
+      const s = sessions[name];
+      const terminal = new Terminal({
+        cursorBlink: true,
+        fontSize: 14,
+        theme: { background: '#1e1e1e' },
+        allowProposedApi: true,
+      });
+
+      const fitAddon = new FitAddon.FitAddon();
+      terminal.loadAddon(fitAddon);
+      terminal.loadAddon(new WebLinksAddon.WebLinksAddon());
+
+      terminal.open(s.wrapper);
+      fitAddon.fit();
+
+      s.terminal = terminal;
+      s.fitAddon = fitAddon;
+
+      connectWebSocket(name);
+    }
+
+    function connectWebSocket(name) {
+      const s = sessions[name];
+      if (!s || !s.terminal) return;
+      if (s.reconnectTimer) { clearTimeout(s.reconnectTimer); s.reconnectTimer = null; }
+
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const url = `${proto}//${location.host}/ws?session=${encodeURIComponent(name)}&cols=${s.terminal.cols}&rows=${s.terminal.rows}`;
+      const ws = new WebSocket(url);
+      s.ws = ws;
+
+      ws.onopen = () => {
+        s.reconnectDelay = 1000;
+
+        // Dispose previous handlers
+        if (s._onData) s._onData.dispose();
+        if (s._onResize) s._onResize.dispose();
+
+        s._onData = s.terminal.onData(data => {
+          if (ws.readyState === WebSocket.OPEN) ws.send(data);
+          eventBus.emit('terminal-write', { session: name, data });
+        });
+
+        s._onResize = s.terminal.onResize(({ cols, rows }) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+          }
+          eventBus.emit('resize', { session: name, cols, rows });
+        });
+
+        s.fitAddon.fit();
+        s.terminal.focus();
+        eventBus.emit('connected', { session: name });
+      };
+
+      ws.onmessage = (event) => {
+        if (s.ws !== ws) return; // stale guard
+        s.terminal.write(event.data);
+        eventBus.emit('data-received', { session: name, data: event.data });
+      };
+
+      ws.onclose = () => {
+        if (s.ws === ws) s.ws = null;
+        if (s.intentionalClose) { s.intentionalClose = false; return; }
+
+        const delay = s.reconnectDelay;
+        s.terminal.write(`\r\n\x1b[33m[Disconnected. Reconnecting in ${Math.round(delay / 1000)}s...]\x1b[0m\r\n`);
+        s.reconnectDelay = Math.min(delay * 1.5, 15000);
+        s.reconnectTimer = setTimeout(() => {
+          if (sessions[name] && activeSession === name) connectWebSocket(name);
+        }, delay);
+
+        eventBus.emit('disconnected', { session: name });
+      };
+
+      ws.onerror = () => {}; // onclose will fire
+    }
+
+    // --- Resize ---
+    window.addEventListener('resize', () => {
+      if (activeSession && sessions[activeSession]?.fitAddon) {
+        sessions[activeSession].fitAddon.fit();
+      }
+    });
+
+    // --- Plugin loading ---
+    async function loadPlugins() {
+      try {
+        const res = await fetch('/api/plugins');
+        const plugins = await res.json();
+        for (const plugin of plugins) {
+          if (!plugin._hasClient) continue;
+          const script = document.createElement('script');
+          script.src = `/plugins/${plugin.id}/client.js`;
+          script.onerror = () => console.warn(`Plugin ${plugin.id}: client.js load error`);
+          document.head.appendChild(script);
+        }
+      } catch (err) {
+        console.warn('Failed to load plugins:', err);
+      }
+    }
+
+    // --- Prevent page scroll on mobile (same approach as tmux-web) ---
+    // xterm.js sets inline styles on canvases — we must override with inline styles too
+    function applyTouchAction() {
+      document.querySelectorAll('.xterm-screen').forEach(screen => {
+        screen.style.touchAction = 'none';
+        screen.querySelectorAll('canvas').forEach(c => { c.style.touchAction = 'none'; });
+      });
+    }
+    // Re-apply whenever terminals are created/changed
+    const touchObserver = new MutationObserver(applyTouchAction);
+    touchObserver.observe(terminalArea, { childList: true, subtree: true });
+
+    // --- Touch scroll (PointerEvents → SGR mouse wheel to tmux) ---
+    (function setupTouchScroll() {
+      const FLING_FRICTION = 0.95;
+      const FLING_MIN_VELOCITY = 0.5;
+
+      let pointerId = null;
+      let lastY = 0, lastTime = 0, accumulated = 0, scrollVelocity = 0;
+      let flingAnim = null, flingAccum = 0;
+      let isScrolling = false, startX = 0, startY = 0;
+      let touchCol = 1, touchRow = 1;
+
+      function getLineHeight() {
+        const s = activeSession && sessions[activeSession];
+        if (s?.terminal?._core?._renderService) {
+          try {
+            const h = s.terminal._core._renderService.dimensions.css.cell.height;
+            if (h > 0) return h;
+          } catch {}
+        }
+        return 14 * 1.2;
+      }
+
+      function getCellCoords(clientX, clientY) {
+        const s = activeSession && sessions[activeSession];
+        if (s?.terminal?._core?._renderService) {
+          try {
+            const dims = s.terminal._core._renderService.dimensions;
+            const cw = dims.css.cell.width, ch = dims.css.cell.height;
+            if (cw > 0 && ch > 0) {
+              const screen = terminalArea.querySelector('.terminal-wrapper.active .xterm-screen');
+              if (screen) {
+                const rect = screen.getBoundingClientRect();
+                return [Math.max(1, Math.floor((clientX - rect.left) / cw) + 1),
+                        Math.max(1, Math.floor((clientY - rect.top) / ch) + 1)];
+              }
+            }
+          } catch {}
+        }
+        return [1, 1];
+      }
+
+      function getWs() {
+        const s = activeSession && sessions[activeSession];
+        return s?.ws?.readyState === WebSocket.OPEN ? s.ws : null;
+      }
+
+      function doScroll(rows) {
+        const ws = getWs();
+        if (!ws || rows === 0) return;
+        // SGR mouse: button 64=scroll back, 65=scroll forward
+        // Swipe down (rows<0) = scroll back through history = button 64
+        const btn = rows < 0 ? 64 : 65;
+        const seq = '\x1b[<' + btn + ';' + touchCol + ';' + touchRow + 'M';
+        const count = Math.abs(rows);
+        for (let i = 0; i < count; i++) ws.send(seq);
+      }
+
+      function stopFling() {
+        if (flingAnim) { cancelAnimationFrame(flingAnim); flingAnim = null; }
+        flingAccum = 0; scrollVelocity = 0;
+      }
+
+      function startFling() {
+        if (Math.abs(scrollVelocity) < FLING_MIN_VELOCITY) { scrollVelocity = 0; return; }
+        const lineH = getLineHeight();
+        flingAccum = 0;
+        function frame() {
+          scrollVelocity *= FLING_FRICTION;
+          if (Math.abs(scrollVelocity) < FLING_MIN_VELOCITY) { flingAnim = null; return; }
+          flingAccum += scrollVelocity * 0.5;
+          const lines = Math.trunc(flingAccum / lineH);
+          if (lines !== 0) { flingAccum -= lines * lineH; doScroll(lines); }
+          flingAnim = requestAnimationFrame(frame);
+        }
+        flingAnim = requestAnimationFrame(frame);
+      }
+
+      terminalArea.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'mouse') return;
+        if (pointerId !== null) return;
+        stopFling();
+        pointerId = e.pointerId;
+        startX = e.clientX; startY = e.clientY;
+        lastY = e.clientY; lastTime = performance.now();
+        accumulated = 0; scrollVelocity = 0; isScrolling = false;
+        const coords = getCellCoords(e.clientX, e.clientY);
+        touchCol = coords[0]; touchRow = coords[1];
+        try { terminalArea.setPointerCapture(e.pointerId); } catch {}
+      });
+
+      terminalArea.addEventListener('pointermove', (e) => {
+        if (e.pointerId !== pointerId) return;
+        const now = performance.now();
+        const dt = now - lastTime;
+        const deltaY = lastY - e.clientY;
+
+        if (!isScrolling) {
+          const dx = Math.abs(e.clientX - startX), dy = Math.abs(e.clientY - startY);
+          if (dy > 10 && dy > dx) { isScrolling = true; }
+          else if (dx > 10 && dx > dy) {
+            try { terminalArea.releasePointerCapture(pointerId); } catch {}
+            pointerId = null; return;
+          }
+          if (!isScrolling) return;
+        }
+
+        if (dt > 0) {
+          const instantVel = deltaY / dt * 16;
+          scrollVelocity = scrollVelocity * 0.3 + instantVel * 0.7;
+        }
+
+        accumulated += deltaY;
+        lastY = e.clientY; lastTime = now;
+
+        const lineH = getLineHeight();
+        const threshold = lineH * 0.5;
+        let rows = 0;
+        if (accumulated >= threshold) {
+          rows = Math.max(1, Math.round(accumulated / lineH));
+          accumulated -= rows * lineH;
+        } else if (accumulated <= -threshold) {
+          rows = Math.min(-1, Math.round(accumulated / lineH));
+          accumulated -= rows * lineH;
+        }
+        if (rows !== 0) doScroll(rows);
+        e.preventDefault();
+      });
+
+      terminalArea.addEventListener('pointerup', (e) => {
+        if (e.pointerId !== pointerId) return;
+        try { terminalArea.releasePointerCapture(pointerId); } catch {}
+        pointerId = null; accumulated = 0;
+        if (isScrolling) startFling();
+        isScrolling = false;
+      });
+
+      terminalArea.addEventListener('pointercancel', (e) => {
+        if (e.pointerId !== pointerId) return;
+        pointerId = null; accumulated = 0; isScrolling = false; stopFling();
+      });
+    })();
+
+    // --- Init ---
+    async function init() {
+      await loadSessions();
+      await loadPlugins();
+      // Poll for session changes
+      setInterval(loadSessions, 10000);
+    }
+
+    init();
+  </script>
+</body>
+</html>

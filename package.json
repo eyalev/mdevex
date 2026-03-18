@@ -1,0 +1,20 @@
+{
+  "name": "web-agent",
+  "version": "0.1.0",
+  "description": "Minimal web-based tmux client with plugin architecture",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "npx playwright test tests/web-agent.spec.js",
+    "visual": "npx playwright test tests/visual.spec.js && npx playwright test tests/touch.spec.js && npx playwright test tests/screencast.spec.js && node tests/copy-screencast.js"
+  },
+  "dependencies": {
+    "express": "^4",
+    "node-pty": "^1",
+    "ws": "^8"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2"
+  }
+}

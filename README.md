@@ -4,6 +4,14 @@ A minimal web-based tmux client with a plugin-first architecture.
 
 Open your tmux sessions in a browser tab. Every feature — tabs, terminal rendering, status bar, settings, touch scrolling — is a plugin, so you can swap pieces out or add your own without forking.
 
+![screencast](docs/media/screencast.gif)
+
+<p align="center">
+  <img src="docs/media/mobile.png" alt="mobile portrait view" height="360">
+  &nbsp;
+  <img src="docs/media/landscape.png" alt="mobile landscape view" height="160">
+</p>
+
 ## Install
 
 ### Global (recommended)

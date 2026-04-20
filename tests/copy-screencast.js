@@ -107,7 +107,7 @@ function generateDashboard(screenshotsDir) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>web-agent — Visual Dashboard</title>
+  <title>mdevex — Visual Dashboard</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; }
@@ -161,7 +161,7 @@ function generateDashboard(screenshotsDir) {
 </head>
 <body>
   <div class="header">
-    <h1>web-agent</h1>
+    <h1>mdevex</h1>
     <span class="total">${runs.length} run${runs.length !== 1 ? 's' : ''}</span>
   </div>
   <div class="layout">

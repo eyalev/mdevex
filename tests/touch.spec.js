@@ -75,10 +75,10 @@ test.describe('touch gestures', () => {
 
     // Type some lines into the terminal to have scrollable content
     // Send newlines to create content in tmux
-    const session = await page.evaluate(() => window.webAgent.getActiveSession());
+    const session = await page.evaluate(() => window.mdevex.getActiveSession());
     for (let i = 0; i < 30; i++) {
       await page.evaluate((line) => {
-        window.webAgent.sendToTerminal(window.webAgent.getActiveSession(), `echo "line ${line}"\r`);
+        window.mdevex.sendToTerminal(window.mdevex.getActiveSession(), `echo "line ${line}"\r`);
       }, i);
       await page.waitForTimeout(50);
     }
@@ -114,7 +114,7 @@ test.describe('touch gestures', () => {
     // Generate scrollback content
     for (let i = 0; i < 50; i++) {
       await page.evaluate((line) => {
-        window.webAgent.sendToTerminal(window.webAgent.getActiveSession(), `echo "fling-${line}"\r`);
+        window.mdevex.sendToTerminal(window.mdevex.getActiveSession(), `echo "fling-${line}"\r`);
       }, i);
       await page.waitForTimeout(30);
     }

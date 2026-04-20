@@ -1,14 +1,47 @@
 {
-  "name": "web-agent",
+  "name": "mdevex",
   "version": "0.1.0",
-  "description": "Minimal web-based tmux client with plugin architecture",
+  "description": "Minimal web-based tmux client with a plugin-first architecture",
   "type": "module",
   "main": "server.js",
+  "bin": {
+    "mdevex": "bin/mdevex.js"
+  },
   "scripts": {
     "start": "node server.js",
-    "test": "npx playwright test tests/web-agent.spec.js",
+    "test": "npx playwright test tests/mdevex.spec.js",
     "visual": "npx playwright test tests/visual.spec.js && npx playwright test tests/touch.spec.js && npx playwright test tests/screencast.spec.js && node tests/copy-screencast.js"
   },
+  "files": [
+    "bin/",
+    "core-plugins/",
+    "plugins/",
+    "public/",
+    "server.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "tmux",
+    "terminal",
+    "xterm",
+    "web-terminal",
+    "plugin",
+    "websocket"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eyalev/mdevex.git"
+  },
+  "bugs": {
+    "url": "https://github.com/eyalev/mdevex/issues"
+  },
+  "homepage": "https://github.com/eyalev/mdevex#readme",
+  "author": "Eyal Levin",
+  "license": "MIT",
   "dependencies": {
     "express": "^4",
     "node-pty": "^1",

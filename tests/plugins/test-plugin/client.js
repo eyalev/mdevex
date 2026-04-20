@@ -12,4 +12,4 @@
   api.on('connected', (data) => {
     window.__testPluginEvents.push({ type: 'connected', ...data });
   });
-})(window.webAgent);
+})(window.mdevex);

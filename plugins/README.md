@@ -1,11 +1,11 @@
-# web-agent plugins
+# mdevex plugins
 
-Plugins extend web-agent with new features. Each plugin is a directory with a `plugin.json` manifest and optional `server.js` and `client.js` files.
+Plugins extend mdevex with new features. Each plugin is a directory with a `plugin.json` manifest and optional `server.js` and `client.js` files.
 
 ## Plugin locations
 
 - `./plugins/` — bundled with the project
-- `~/.web-agent/plugins/` — user plugins
+- `~/.mdevex/plugins/` — user plugins
 
 ## Structure
 
@@ -58,7 +58,7 @@ export default function(api) {
 
 ## Client-side plugin (client.js)
 
-IIFE that receives `window.webAgent`:
+IIFE that receives `window.mdevex`:
 
 ```javascript
 (function(api) {
@@ -74,7 +74,7 @@ IIFE that receives `window.webAgent`:
 
   // Decorate a tab
   api.decorateTab('my-session', '<span style="color:green">●</span>');
-})(window.webAgent);
+})(window.mdevex);
 ```
 
 ### Client API

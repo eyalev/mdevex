@@ -1,10 +1,10 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('web-agent core', () => {
+test.describe('mdevex core', () => {
 
   test('page loads with title', async ({ page }) => {
     await page.goto('/');
-    await expect(page).toHaveTitle('web-agent');
+    await expect(page).toHaveTitle('mdevex');
   });
 
   test('sessions API returns sessions', async ({ request }) => {
@@ -94,15 +94,15 @@ test.describe('web-agent core', () => {
     // Force-close the WebSocket via the API
     const gotDisconnect = await page.evaluate(() => {
       return new Promise(resolve => {
-        window.webAgent.on('disconnected', () => resolve(true));
-        window.webAgent.disconnect();
+        window.mdevex.on('disconnected', () => resolve(true));
+        window.mdevex.disconnect();
       });
     });
     expect(gotDisconnect).toBe(true);
     // Should reconnect automatically — wait for connected event
     const reconnected = await page.evaluate(() => {
       return new Promise(resolve => {
-        window.webAgent.on('connected', () => resolve(true));
+        window.mdevex.on('connected', () => resolve(true));
         setTimeout(() => resolve(false), 5000);
       });
     });
@@ -192,9 +192,9 @@ test.describe('UI slots', () => {
     }
   });
 
-  test('webAgent.slots exposes all slots', async ({ page }) => {
+  test('mdevex.slots exposes all slots', async ({ page }) => {
     await page.goto('/');
-    const slotKeys = await page.evaluate(() => Object.keys(window.webAgent.slots));
+    const slotKeys = await page.evaluate(() => Object.keys(window.mdevex.slots));
     expect(slotKeys).toContain('top-bar');
     expect(slotKeys).toContain('bottom-bar');
     expect(slotKeys).toContain('toolbar-left');

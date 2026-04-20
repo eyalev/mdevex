@@ -18,7 +18,7 @@ export default defineConfig({
     port: 7683,
     reuseExistingServer: true,
     timeout: 10000,
-    env: { ...process.env, PORT: '7683', WA_EXTRA_PLUGIN_DIR: join(__dirname, 'tests', 'plugins') },
+    env: { ...process.env, PORT: '7683', MDEVEX_EXTRA_PLUGIN_DIR: join(__dirname, 'tests', 'plugins') },
   },
   globalSetup: './tests/global-setup.js',
   globalTeardown: './tests/global-teardown.js',
